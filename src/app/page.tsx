@@ -250,7 +250,7 @@ export default async function HomePage() {
 
         {tours.length > 0 ? (
           <div
-            className={`grid min-w-0 grid-cols-1 items-stretch gap-5 sm:grid-cols-2 ${getTourColumns(recommended.length)}`}
+            className={`grid min-w-0 grid-cols-1 items-stretch gap-5 sm:grid-cols-2 ${getTourColumns(tours.length)}`}
           >
             {tours.map((tour) => (
               <article
