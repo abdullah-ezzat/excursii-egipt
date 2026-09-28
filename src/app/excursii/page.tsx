@@ -5,8 +5,6 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { prisma } from "@/lib/prisma";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
 
 export const metadata = {
   title: "Egypt Excursions",
@@ -75,7 +73,7 @@ export default async function ToursPage({ searchParams }: ToursPageProps) {
     <>
       {/* PAGE HEADER */}
       <div className="bg-[#2b211c] text-white">
-        <SiteHeader />
+  
 
         <div className="container-x pb-16 pt-40">
           <p className="text-xs font-bold uppercase tracking-[.25em] text-[#d7ac69]">
@@ -224,7 +222,7 @@ export default async function ToursPage({ searchParams }: ToursPageProps) {
 
                   {/* PRICE AND DURATION */}
                   <div className="mt-auto">
-                    <div className="mt-5 flex items-center justify-between gap-3 border-t border-[#eee6db] pt-4">
+                    {tour.price > 0 && <div className="mt-5 flex items-center justify-between gap-3 border-t border-[#eee6db] pt-4">
                       <div className="min-w-0">
                         <span className="block text-[10px] uppercase tracking-wider text-[#8c8177]">
                           From
@@ -246,7 +244,7 @@ export default async function ToursPage({ searchParams }: ToursPageProps) {
                           {tour.duration}
                         </span>
                       )}
-                    </div>
+                    </div>}
 
                     {/* DETAILS BUTTON */}
                     <Link
@@ -266,8 +264,6 @@ export default async function ToursPage({ searchParams }: ToursPageProps) {
           </div>
         )}
       </main>
-
-      <SiteFooter />
     </>
   );
 }

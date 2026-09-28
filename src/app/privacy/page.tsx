@@ -1,4 +1,72 @@
-import {SiteHeader} from "@/components/site-header";import {SiteFooter} from "@/components/site-footer";
-export const metadata={title:"Privacy Policy",description:"How Excursii Egipt handles personal information and privacy requests."};
-const sections=[{title:"1. Data controller and scope",body:"This notice explains how the operator of excursiiegipt.com (referred to as “Excursii Egipt”, “we” or “us”) handles personal data when you browse the website, contact us or request an excursion. The legal name, registered address and company registration details of the website operator must be inserted here by the site owner before production launch. Contact us through the Contact page or WhatsApp +40 725 124 853 for privacy-related enquiries."},{title:"2. Personal data we may process",body:"Depending on your interaction, we may process your name, email address, phone number, travel or requested excursion date, number of participants, message contents, correspondence, and information you choose to provide. Technical logs such as IP address, device/browser details and security events may be processed by hosting infrastructure. Please do not send passport, payment-card or other sensitive information through ordinary enquiry forms or WhatsApp unless specifically requested through an appropriate secure process."},{title:"3. Purposes and legal bases",body:"We use enquiry and booking details to respond to requests, check availability, prepare or perform services and communicate about your trip (steps at your request and/or contract performance). We may retain records to meet applicable accounting, tax and legal duties (legal obligation). We process limited technical and security data to operate, secure and troubleshoot the website (legitimate interests, balanced against your rights). We will send direct marketing only where we have a valid legal basis, including consent where required; marketing consent is optional and can be withdrawn at any time."},{title:"4. Required and optional information",body:"Information marked as required in an enquiry or booking form is needed to respond or process the request. If you do not provide it, we may be unable to handle the request. Marketing consent and optional details are not a condition of submitting an enquiry."},{title:"5. Retention",body:"We keep personal data only for as long as needed for the purposes described, including the duration of enquiries and services, legitimate follow-up, and applicable statutory limitation, tax and accounting periods. The actual period depends on the record type and applicable law. Data no longer required is securely deleted or anonymized, unless retention is legally required."},{title:"6. Recipients and international transfers",body:"Data may be accessed by personnel and service providers who support website hosting, database operations, communications, security and excursion fulfilment, and by public authorities where required by law. Providers should be subject to appropriate confidentiality and data-processing terms. The website operator must document the actual providers and hosting locations before launch. If data is transferred outside the European Economic Area, appropriate safeguards will be used where required by applicable data-protection law."},{title:"7. Your data protection rights",body:"Subject to applicable law, you may request access, rectification, erasure, restriction, portability, or object to processing; you may also withdraw consent where processing is based on consent. Withdrawal does not affect processing already carried out lawfully. You may lodge a complaint with your competent supervisory authority, including Romania’s National Supervisory Authority for Personal Data Processing (ANSPDCP) if applicable. We may need to verify your identity before fulfilling a request."},{title:"8. Children",body:"Our website and excursion enquiry services are directed to adults arranging travel. Please do not submit a child’s personal information unless you are their parent or legal guardian and it is necessary for the requested service."},{title:"9. Security",body:"We use reasonable technical and organizational safeguards appropriate to the website and the information processed. No internet transmission or storage system can be guaranteed completely secure. Contact us promptly if you believe information has been submitted to us in error or an account has been compromised."},{title:"10. Changes and contact",body:"We may update this notice to reflect changes in the website, services or law. The latest version and revision date will be posted on this page. For privacy requests, contact us through the website’s Contact page or WhatsApp +40 725 124 853. The site owner must add a monitored privacy email address and verified legal-entity details before public launch."}];
-export default function PrivacyPolicy(){return <><div className="bg-[#2b211c] text-white"><SiteHeader/><div className="container-x pb-14 pt-40"><h1 className="serif text-5xl md:text-6xl">Privacy Policy</h1><p className="mt-4 text-sm text-white/60">Last updated: September 2026</p></div></div><main className="container-x max-w-4xl py-14">{sections.map(s=><section key={s.title} className="mb-8"><h2 className="serif text-2xl">{s.title}</h2><p className="mt-3 whitespace-pre-line text-sm leading-7 text-[#665b52]">{s.body}</p></section>)}</main><SiteFooter/></>}
+export const metadata = {
+  title: "Privacy Policy",
+  description:
+    "How Excursii Egipt handles personal information and privacy requests.",
+};
+const sections = [
+  {
+    title: "1. Data controller and scope",
+    body: "This notice explains how the operator of excursiiegipt.com (referred to as “Excursii Egipt”, “we” or “us”) handles personal data when you browse the website, contact us or request an excursion. The legal name, registered address and company registration details of the website operator must be inserted here by the site owner before production launch. Contact us through the Contact page or WhatsApp +40 725 124 853 for privacy-related enquiries.",
+  },
+  {
+    title: "2. Personal data we may process",
+    body: "Depending on your interaction, we may process your name, email address, phone number, travel or requested excursion date, number of participants, message contents, correspondence, and information you choose to provide. Technical logs such as IP address, device/browser details and security events may be processed by hosting infrastructure. Please do not send passport, payment-card or other sensitive information through ordinary enquiry forms or WhatsApp unless specifically requested through an appropriate secure process.",
+  },
+  {
+    title: "3. Purposes and legal bases",
+    body: "We use enquiry and booking details to respond to requests, check availability, prepare or perform services and communicate about your trip (steps at your request and/or contract performance). We may retain records to meet applicable accounting, tax and legal duties (legal obligation). We process limited technical and security data to operate, secure and troubleshoot the website (legitimate interests, balanced against your rights). We will send direct marketing only where we have a valid legal basis, including consent where required; marketing consent is optional and can be withdrawn at any time.",
+  },
+  {
+    title: "4. Required and optional information",
+    body: "Information marked as required in an enquiry or booking form is needed to respond or process the request. If you do not provide it, we may be unable to handle the request. Marketing consent and optional details are not a condition of submitting an enquiry.",
+  },
+  {
+    title: "5. Retention",
+    body: "We keep personal data only for as long as needed for the purposes described, including the duration of enquiries and services, legitimate follow-up, and applicable statutory limitation, tax and accounting periods. The actual period depends on the record type and applicable law. Data no longer required is securely deleted or anonymized, unless retention is legally required.",
+  },
+  {
+    title: "6. Recipients and international transfers",
+    body: "Data may be accessed by personnel and service providers who support website hosting, database operations, communications, security and excursion fulfilment, and by public authorities where required by law. Providers should be subject to appropriate confidentiality and data-processing terms. The website operator must document the actual providers and hosting locations before launch. If data is transferred outside the European Economic Area, appropriate safeguards will be used where required by applicable data-protection law.",
+  },
+  {
+    title: "7. Your data protection rights",
+    body: "Subject to applicable law, you may request access, rectification, erasure, restriction, portability, or object to processing; you may also withdraw consent where processing is based on consent. Withdrawal does not affect processing already carried out lawfully. You may lodge a complaint with your competent supervisory authority, including Romania’s National Supervisory Authority for Personal Data Processing (ANSPDCP) if applicable. We may need to verify your identity before fulfilling a request.",
+  },
+  {
+    title: "8. Children",
+    body: "Our website and excursion enquiry services are directed to adults arranging travel. Please do not submit a child’s personal information unless you are their parent or legal guardian and it is necessary for the requested service.",
+  },
+  {
+    title: "9. Security",
+    body: "We use reasonable technical and organizational safeguards appropriate to the website and the information processed. No internet transmission or storage system can be guaranteed completely secure. Contact us promptly if you believe information has been submitted to us in error or an account has been compromised.",
+  },
+  {
+    title: "10. Changes and contact",
+    body: "We may update this notice to reflect changes in the website, services or law. The latest version and revision date will be posted on this page. For privacy requests, contact us through the website’s Contact page or WhatsApp +40 725 124 853. The site owner must add a monitored privacy email address and verified legal-entity details before public launch.",
+  },
+];
+export default function PrivacyPolicy() {
+  return (
+    <>
+      <div className="bg-[#2b211c] text-white">
+        
+        <div className="container-x pb-14 pt-40">
+          <h1 className="serif text-5xl md:text-6xl">Privacy Policy</h1>
+          <p className="mt-4 text-sm text-white/60">
+            Last updated: September 2026
+          </p>
+        </div>
+      </div>
+      <main className="container-x max-w-4xl py-14">
+        {sections.map((s) => (
+          <section key={s.title} className="mb-8">
+            <h2 className="serif text-2xl">{s.title}</h2>
+            <p className="mt-3 whitespace-pre-line text-sm leading-7 text-[#665b52]">
+              {s.body}
+            </p>
+          </section>
+        ))}
+      </main>
+    </>
+  );
+}

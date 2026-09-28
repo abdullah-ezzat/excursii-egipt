@@ -12,8 +12,7 @@ import {
 } from "lucide-react";
 
 import { prisma } from "@/lib/prisma";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
+
 import { RichText } from "@/components/rich-text";
 import { ReadMore } from "@/components/read-more";
 
@@ -53,7 +52,7 @@ export default async function HomePage() {
             { featured: "desc" },
             { createdAt: "desc" },
           ],
-          take: 6,
+          take: 8,
         }),
 
         prisma.specialOffer.findMany({
@@ -68,7 +67,7 @@ export default async function HomePage() {
             recommended: true,
           },
           orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }],
-          take: 3,
+          take: 9,
         }),
 
         prisma.galleryItem.findMany({
@@ -94,7 +93,7 @@ export default async function HomePage() {
 
   return (
     <main>
-      <SiteHeader />
+
 
       {/* HERO */}
       <section
@@ -195,7 +194,7 @@ export default async function HomePage() {
             </p>
 
             <h2 className="serif text-4xl leading-tight md:text-6xl">
-              Unmissable <em className="text-[#a8793d]">experiences</em>
+              Unmissable <em className="text-[#a8793d]"> experiences </em>
             </h2>
 
             <p className="mt-4 max-w-lg text-sm leading-6 text-[#776b61]">
@@ -276,7 +275,7 @@ export default async function HomePage() {
                   </div>
 
                   {/* Price stays at the bottom */}
-                  <div className="mt-auto flex items-center justify-between border-t border-[#eee6db] pt-5">
+                  {tour.price > 0 && <div className="mt-auto flex items-center justify-between border-t border-[#eee6db] pt-5">
                     <div>
                       <span className="block text-[10px] uppercase tracking-wider text-[#8c8177]">
                         From
@@ -297,7 +296,7 @@ export default async function HomePage() {
                     >
                       <ArrowRight size={17} />
                     </Link>
-                  </div>
+                  </div>}
                 </div>
               </article>
             ))}
@@ -682,8 +681,6 @@ export default async function HomePage() {
           </form>
         </div>
       </section>
-
-      <SiteFooter />
     </main>
   );
 }

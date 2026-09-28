@@ -78,3 +78,17 @@ html[dir="rtl"] select {
 html[dir="rtl"] table {
     direction: rtl;
 }
+
+html {
+  overflow-x: clip;
+}
+
+body {
+  overflow-x: clip;
+}
+
+.site-header {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}

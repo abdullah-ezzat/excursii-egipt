@@ -125,19 +125,24 @@ const languageRegions: Record<string, string> = {
   hu: "HU",
 };
 
+function normalizeCode(code: string): string {
+  return code.trim().toLowerCase();
+}
+
 function countryFlag(code: string): string {
-  if (!/^[A-Z]{2}$/.test(code)) return "🌐";
+  if (!/^[A-Z]{2}$/.test(code)) {
+    return "🌐";
+  }
 
   return String.fromCodePoint(
-    ...[...code].map((c) => 127397 + c.charCodeAt(0)),
+    ...[...code].map((char) => 127397 + char.charCodeAt(0)),
   );
 }
 
 function getFlag(code: string): string {
-  const normalized = code.toLowerCase();
+  const normalized = normalizeCode(code);
   const parts = normalized.split("-");
 
-  // Regional language codes, such as en-US.
   if (parts.length > 1) {
     const region = parts[parts.length - 1].toUpperCase();
 
@@ -151,28 +156,25 @@ function getFlag(code: string): string {
   return region ? countryFlag(region) : "🌐";
 }
 
-function normalizeCode(code: string) {
-  return code.trim().toLowerCase();
+function isEnglish(language: string): boolean {
+  const code = normalizeCode(language);
+
+  return code === "en" || code.startsWith("en-");
 }
 
-function applyDirection(language: string) {
-  const base = language.split("-")[0].toLowerCase();
+function applyDirection(language: string): void {
+  const base = normalizeCode(language).split("-")[0];
 
   document.documentElement.lang = language;
   document.documentElement.dir = rtlLanguages.includes(base) ? "rtl" : "ltr";
 }
 
-function isEnglish(language: string) {
-  return (
-    normalizeCode(language) === "en" ||
-    normalizeCode(language).startsWith("en-")
-  );
-}
-
 function shouldIgnore(node: Text): boolean {
   const parent = node.parentElement;
 
-  if (!parent) return true;
+  if (!parent) {
+    return true;
+  }
 
   if (
     parent.closest(
@@ -190,7 +192,10 @@ function shouldIgnore(node: Text): boolean {
         "option",
         "svg",
         "math",
-        "[contenteditable='true']",
+        "iframe",
+        "canvas",
+        "[contenteditable]",
+        "[aria-hidden='true']",
       ].join(","),
     )
   ) {
@@ -199,8 +204,11 @@ function shouldIgnore(node: Text): boolean {
 
   const text = node.data || "";
 
-  if (!text.trim()) return true;
+  if (!text.trim()) {
+    return true;
+  }
 
+  // Skip Next.js internal payloads.
   if (
     text.includes("self.__next_r") ||
     text.includes("self.__next_f") ||
@@ -213,86 +221,98 @@ function shouldIgnore(node: Text): boolean {
   return false;
 }
 
-function isTranslatableText(text: string) {
+function isTranslatableText(text: string): boolean {
   const trimmed = text.trim();
 
-  if (trimmed.length < 2) return false;
+  if (trimmed.length < 2) {
+    return false;
+  }
 
-  // Skip strings without letters.
-  if (!/\p{L}/u.test(trimmed)) return false;
-
-  return true;
+  return /\p{L}/u.test(trimmed);
 }
 
-// Use the supported language models returned by LibreTranslate.
-// The server's /languages response contains source models,
-// each with the targets that model can translate into.
+/**
+ * Fetch supported destination languages through Next.js.
+ *
+ * The browser must not call 127.0.0.1:5000 directly.
+ */
 async function fetchSupportedLanguages(): Promise<Language[]> {
-  const response = await fetch("http://127.0.0.1:5000/languages", {
+  const response = await fetch("/api/translate/languages", {
+    method: "GET",
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to load translation models: ${response.status}`);
+    throw new Error(`Failed to load translation languages: ${response.status}`);
   }
 
   const data: unknown = await response.json();
 
   if (!Array.isArray(data)) {
-    throw new Error("Invalid LibreTranslate languages response");
+    throw new Error("Invalid translation languages response");
   }
 
   const models = data.filter(
-    (item: any) =>
-      item && typeof item.code === "string" && Array.isArray(item.targets),
-  ) as Language[];
+    (item): item is Language =>
+      typeof item === "object" &&
+      item !== null &&
+      "code" in item &&
+      typeof item.code === "string" &&
+      "targets" in item &&
+      Array.isArray(item.targets),
+  );
 
-  // Only offer destination languages supported
-  // by at least one loaded source model.
   const availableTargets = new Set<string>();
 
   for (const model of models) {
     for (const target of model.targets ?? []) {
-      availableTargets.add(normalizeCode(target));
+      if (typeof target === "string") {
+        availableTargets.add(normalizeCode(target));
+      }
     }
   }
 
-  // English can be offered only if the server
-  // supports it as a destination.
-  const supported = models
-    .filter((model) => availableTargets.has(normalizeCode(model.code)))
-    .map((model) => ({
-      ...model,
-      code: normalizeCode(model.code),
-    }));
+  // Only offer languages the server supports as targets.
+  const supported = models.filter((model) =>
+    availableTargets.has(normalizeCode(model.code)),
+  );
 
-  // Merge duplicate model entries by code.
   const unique = new Map<string, Language>();
 
   for (const model of supported) {
-    if (!unique.has(model.code)) {
-      unique.set(model.code, model);
+    const code = normalizeCode(model.code);
+
+    if (!unique.has(code)) {
+      unique.set(code, {
+        ...model,
+        code,
+      });
     }
   }
 
   return Array.from(unique.values());
 }
 
-// Translation API proxy.
-// The source is "auto" for English destination,
-// otherwise the original content is assumed English.
+/**
+ * Translate a batch using the Next.js API route.
+ */
 async function translateBatch(
   texts: string[],
   source: string,
   target: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
-  if (!texts.length) return [];
+  if (texts.length === 0) {
+    return [];
+  }
 
   const response = await fetch("/api/translate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
+    cache: "no-store",
+    signal,
     body: JSON.stringify({
       texts,
       source,
@@ -315,289 +335,60 @@ async function translateBatch(
   return data.translations;
 }
 
+type PendingTranslation = {
+  node: Text;
+  original: string;
+  cacheKey: string;
+};
+
 export function LanguageSelector() {
   const [lang, setLang] = useState("en");
-
   const [busy, setBusy] = useState(false);
-
   const [langs, setLangs] = useState<LanguageOption[]>([]);
+  const [languageError, setLanguageError] = useState("");
 
-  // Keep the original text for each text node.
+  // The original English content for each DOM text node.
   const originalsRef = useRef(new WeakMap<Text, string>());
 
-  // Records the last translated value applied
-  // by this component.
+  // Last translated value written by this component.
   const translatedValuesRef = useRef(new WeakMap<Text, string>());
 
-  // Avoid repeatedly translating identical strings.
+  // Cache translations across scans and language changes.
   const cacheRef = useRef(new Map<string, string>());
 
   const currentLangRef = useRef("en");
-
   const busyRef = useRef(false);
+  const mountedRef = useRef(false);
 
   const scanAgainRef = useRef(false);
-
-  const observerRef = useRef<MutationObserver | null>(null);
+  const requestIdRef = useRef(0);
 
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const observerRef = useRef<MutationObserver | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const requestIdRef = useRef(0);
-
-  // Load languages from the LibreTranslate models.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadLanguages() {
-      try {
-        const supported = await fetchSupportedLanguages();
-
-        if (cancelled) return;
-
-        const options: LanguageOption[] = supported.map((item) => ({
-          ...item,
-          flag: getFlag(item.code),
-        }));
-
-        setLangs(options);
-
-        const savedCookie = document.cookie.match(/(?:^|; )site_lang=([^;]+)/);
-
-        const saved = savedCookie ? decodeURIComponent(savedCookie[1]) : "en";
-
-        const selected = options.some(
-          (item) => normalizeCode(item.code) === normalizeCode(saved),
-        )
-          ? normalizeCode(saved)
-          : "en";
-
-        currentLangRef.current = selected;
-
-        setLang(selected);
-
-        applyDirection(selected);
-      } catch (error) {
-        console.error("Could not load LibreTranslate models:", error);
-
-        if (cancelled) return;
-
-        // Fallback list is deduplicated and filtered
-        // against the known available model list.
-        const fallback = new Map<string, LanguageOption>();
-
-        for (const item of fallbackLangs) {
-          const code = normalizeCode(item.code);
-
-          if (!fallback.has(code)) {
-            fallback.set(code, {
-              ...item,
-              code,
-              flag: getFlag(code),
-            });
-          }
-        }
-
-        setLangs(Array.from(fallback.values()));
-      }
+  /**
+   * Schedule one debounced scan.
+   */
+  const scheduleScan = useCallback((delay = 500) => {
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current);
     }
 
-    void loadLanguages();
+    scanTimerRef.current = setTimeout(() => {
+      scanTimerRef.current = null;
 
-    return () => {
-      cancelled = true;
-    };
+      if (mountedRef.current) {
+        void scanAndTranslateRef.current();
+      }
+    }, delay);
   }, []);
 
-  const scanAndTranslate = useCallback(async (requestedLanguage?: string) => {
-    if (busyRef.current) {
-      scanAgainRef.current = true;
-      return;
-    }
-
-    const target = requestedLanguage || currentLangRef.current;
-
-    if (!target) return;
-
-    busyRef.current = true;
-    setBusy(true);
-
-    scanAgainRef.current = false;
-
-    const requestId = ++requestIdRef.current;
-
-    try {
-      const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT,
-        {
-          acceptNode(node) {
-            const textNode = node as Text;
-
-            if (shouldIgnore(textNode)) {
-              return NodeFilter.FILTER_REJECT;
-            }
-
-            if (!isTranslatableText(textNode.data)) {
-              return NodeFilter.FILTER_REJECT;
-            }
-
-            return NodeFilter.FILTER_ACCEPT;
-          },
-        },
-      );
-
-      const pending: {
-        node: Text;
-        original: string;
-        cacheKey: string;
-      }[] = [];
-
-      let current: Node | null;
-
-      while ((current = walker.nextNode())) {
-        const node = current as Text;
-
-        const currentText = node.data;
-
-        const previousTranslated = translatedValuesRef.current.get(node);
-
-        // The current text is already the
-        // translated output from this component.
-        if (
-          previousTranslated !== undefined &&
-          currentText === previousTranslated
-        ) {
-          continue;
-        }
-
-        let original = originalsRef.current.get(node);
-
-        // This node is new, or React replaced
-        // its content since the previous scan.
-        if (
-          original === undefined ||
-          (previousTranslated !== undefined &&
-            currentText !== previousTranslated)
-        ) {
-          original = currentText;
-
-          originalsRef.current.set(node, original);
-
-          translatedValuesRef.current.delete(node);
-        }
-
-        if (!isTranslatableText(original)) {
-          continue;
-        }
-
-        const source = isEnglish(target) ? "auto" : "en";
-
-        const cacheKey = `${source}:${target}:${original}`;
-
-        const cached = cacheRef.current.get(cacheKey);
-
-        if (cached !== undefined) {
-          if (node.isConnected) {
-            node.data = cached;
-
-            translatedValuesRef.current.set(node, cached);
-          }
-
-          continue;
-        }
-
-        pending.push({
-          node,
-          original,
-          cacheKey,
-        });
-      }
-
-      // Process in small batches.
-      const batchSize = 20;
-
-      for (let i = 0; i < pending.length; i += batchSize) {
-        if (
-          requestId !== requestIdRef.current ||
-          target !== currentLangRef.current
-        ) {
-          break;
-        }
-
-        const batch = pending.slice(i, i + batchSize);
-
-        const source = isEnglish(target) ? "auto" : "en";
-
-        const translations = await translateBatch(
-          batch.map((item) => item.original),
-          source,
-          target,
-        );
-
-        if (
-          requestId !== requestIdRef.current ||
-          target !== currentLangRef.current
-        ) {
-          break;
-        }
-
-        batch.forEach((item, index) => {
-          const translated = translations[index];
-
-          if (typeof translated !== "string" || !translated.trim()) {
-            return;
-          }
-
-          const result = translated;
-
-          cacheRef.current.set(item.cacheKey, result);
-
-          if (!item.node.isConnected || shouldIgnore(item.node)) {
-            return;
-          }
-
-          // Avoid overwriting a node that React
-          // or another script has changed.
-          const savedOriginal = originalsRef.current.get(item.node);
-
-          if (savedOriginal !== item.original) {
-            return;
-          }
-
-          // In English mode, preserve the original
-          // if LibreTranslate returns it unchanged.
-          // It may already be English.
-          if (isEnglish(target) && result.trim() === item.original.trim()) {
-            return;
-          }
-
-          item.node.data = result;
-
-          translatedValuesRef.current.set(item.node, result);
-        });
-      }
-    } catch (error) {
-      console.error("Translation scan failed:", error);
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-
-      if (scanAgainRef.current) {
-        scanAgainRef.current = false;
-
-        if (scanTimerRef.current) {
-          clearTimeout(scanTimerRef.current);
-        }
-
-        scanTimerRef.current = setTimeout(() => {
-          void scanAndTranslate();
-        }, 400);
-      }
-    }
-  }, []);
-
+  /**
+   * Restore original text without overwriting changes
+   * made by React or other scripts.
+   */
   const restoreOriginals = useCallback(() => {
     const walker = document.createTreeWalker(
       document.body,
@@ -608,18 +399,15 @@ export function LanguageSelector() {
 
     while ((current = walker.nextNode())) {
       const node = current as Text;
+      const translated = translatedValuesRef.current.get(node);
 
-      const lastTranslated = translatedValuesRef.current.get(node);
-
-      if (lastTranslated === undefined) {
+      if (translated === undefined) {
         continue;
       }
 
       const original = originalsRef.current.get(node);
 
-      // Restore only text that still matches
-      // our own last translated value.
-      if (original !== undefined && node.data === lastTranslated) {
+      if (original !== undefined && node.data === translated) {
         node.data = original;
       }
 
@@ -627,75 +415,344 @@ export function LanguageSelector() {
     }
   }, []);
 
-  const changeLanguage = useCallback(
-    async (language: string) => {
-      const target = normalizeCode(language);
-
-      if (target === currentLangRef.current) {
+  /**
+   * Translate the current page into the requested language.
+   */
+  const scanAndTranslate = useCallback(
+    async (requestedLanguage?: string) => {
+      if (!mountedRef.current) {
         return;
       }
 
-      // Do not allow a previous request to apply
-      // translations after the language changes.
-      requestIdRef.current++;
-
-      currentLangRef.current = target;
-
-      setLang(target);
-
-      document.cookie = `site_lang=${encodeURIComponent(target)};path=/;max-age=31536000;samesite=lax`;
-
-      applyDirection(target);
-
-      restoreOriginals();
-
-      await scanAndTranslate(target);
-    },
-    [restoreOriginals, scanAndTranslate],
-  );
-
-  // Watch for dynamic React content.
-  useEffect(() => {
-    if (!document.body) return;
-
-    const scheduleScan = () => {
-      if (scanTimerRef.current) {
-        clearTimeout(scanTimerRef.current);
+      if (busyRef.current) {
+        scanAgainRef.current = true;
+        return;
       }
 
-      scanTimerRef.current = setTimeout(() => {
-        void scanAndTranslate();
-      }, 600);
+      const target = normalizeCode(requestedLanguage || currentLangRef.current);
+
+      if (!target || isEnglish(target)) {
+        restoreOriginals();
+        return;
+      }
+
+      busyRef.current = true;
+      setBusy(true);
+
+      scanAgainRef.current = false;
+
+      const requestId = ++requestIdRef.current;
+      const controller = new AbortController();
+
+      abortControllerRef.current = controller;
+
+      const isCurrentRequest = () =>
+        mountedRef.current &&
+        requestId === requestIdRef.current &&
+        target === currentLangRef.current &&
+        !controller.signal.aborted;
+
+      try {
+        const walker = document.createTreeWalker(
+          document.body,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode(node) {
+              const textNode = node as Text;
+
+              if (shouldIgnore(textNode)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+
+              if (!isTranslatableText(textNode.data)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+
+              return NodeFilter.FILTER_ACCEPT;
+            },
+          },
+        );
+
+        const pending: PendingTranslation[] = [];
+
+        let current: Node | null;
+
+        while ((current = walker.nextNode())) {
+          const node = current as Text;
+          const currentText = node.data;
+
+          const previousTranslated = translatedValuesRef.current.get(node);
+
+          // Already translated into the active language.
+          if (
+            previousTranslated !== undefined &&
+            currentText === previousTranslated
+          ) {
+            continue;
+          }
+
+          let original = originalsRef.current.get(node);
+
+          // New text node or React changed the text.
+          if (
+            original === undefined ||
+            (previousTranslated !== undefined &&
+              currentText !== previousTranslated)
+          ) {
+            original = currentText;
+
+            originalsRef.current.set(node, original);
+            translatedValuesRef.current.delete(node);
+          }
+
+          if (!isTranslatableText(original)) {
+            continue;
+          }
+
+          const source = "en";
+          const cacheKey = `${source}:${target}:${original}`;
+
+          const cached = cacheRef.current.get(cacheKey);
+
+          if (cached !== undefined) {
+            if (
+              node.isConnected &&
+              !shouldIgnore(node) &&
+              node.data === original &&
+              isCurrentRequest()
+            ) {
+              node.data = cached;
+              translatedValuesRef.current.set(node, cached);
+            }
+
+            continue;
+          }
+
+          pending.push({
+            node,
+            original,
+            cacheKey,
+          });
+        }
+
+        const batchSize = 20;
+
+        for (let i = 0; i < pending.length; i += batchSize) {
+          if (!isCurrentRequest()) {
+            break;
+          }
+
+          const batch = pending.slice(i, i + batchSize);
+
+          const translations = await translateBatch(
+            batch.map((item) => item.original),
+            "en",
+            target,
+            controller.signal,
+          );
+
+          if (!isCurrentRequest()) {
+            break;
+          }
+
+          for (let index = 0; index < batch.length; index++) {
+            const item = batch[index];
+            const translated = translations[index];
+
+            if (typeof translated !== "string" || !translated.trim()) {
+              continue;
+            }
+
+            // Cache even when the node has been removed.
+            cacheRef.current.set(item.cacheKey, translated);
+
+            // Do not overwrite a removed or excluded node.
+            if (!item.node.isConnected || shouldIgnore(item.node)) {
+              continue;
+            }
+
+            // Only write if React has not changed the node.
+            if (item.node.data !== item.original) {
+              continue;
+            }
+
+            if (originalsRef.current.get(item.node) !== item.original) {
+              continue;
+            }
+
+            item.node.data = translated;
+
+            translatedValuesRef.current.set(item.node, translated);
+          }
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name !== "AbortError") {
+          console.error("Translation scan failed:", error);
+        }
+      } finally {
+        if (requestId === requestIdRef.current) {
+          busyRef.current = false;
+          abortControllerRef.current = null;
+
+          if (mountedRef.current) {
+            setBusy(false);
+          }
+
+          if (scanAgainRef.current && mountedRef.current) {
+            scanAgainRef.current = false;
+            scheduleScan(300);
+          }
+        }
+      }
+    },
+    [restoreOriginals, scheduleScan],
+  );
+
+  // Keep a stable reference for the observer and timers.
+  const scanAndTranslateRef = useRef(scanAndTranslate);
+
+  useEffect(() => {
+    scanAndTranslateRef.current = scanAndTranslate;
+  }, [scanAndTranslate]);
+
+  /**
+   * Load available languages and restore the saved choice.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLanguages() {
+      try {
+        const supported = await fetchSupportedLanguages();
+
+        if (cancelled) {
+          return;
+        }
+
+        const options: LanguageOption[] = supported.map((item) => ({
+          ...item,
+          flag: getFlag(item.code),
+        }));
+
+        // Ensure English is available as the default.
+        if (!options.some((item) => item.code === "en")) {
+          options.unshift({
+            code: "en",
+            name: "English",
+            flag: getFlag("en"),
+          });
+        }
+
+        setLangs(options);
+
+        const cookie = document.cookie.match(/(?:^|;\s*)site_lang=([^;]+)/);
+
+        let saved = "en";
+
+        if (cookie?.[1]) {
+          try {
+            saved = normalizeCode(decodeURIComponent(cookie[1]));
+          } catch {
+            saved = "en";
+          }
+        }
+
+        const selected = options.some((item) => item.code === saved)
+          ? saved
+          : "en";
+
+        currentLangRef.current = selected;
+
+        setLang(selected);
+        applyDirection(selected);
+
+        setLanguageError("");
+      } catch (error) {
+        console.error("Could not load translation languages:", error);
+
+        if (cancelled) {
+          return;
+        }
+
+        const options: LanguageOption[] = fallbackLangs.map((item) => ({
+          ...item,
+          code: normalizeCode(item.code),
+          flag: getFlag(item.code),
+        }));
+
+        setLangs(options);
+
+        const cookie = document.cookie.match(/(?:^|;\s*)site_lang=([^;]+)/);
+
+        let saved = "en";
+
+        if (cookie?.[1]) {
+          try {
+            saved = normalizeCode(decodeURIComponent(cookie[1]));
+          } catch {
+            saved = "en";
+          }
+        }
+
+        const selected = options.some((item) => item.code === saved)
+          ? saved
+          : "en";
+
+        currentLangRef.current = selected;
+
+        setLang(selected);
+        applyDirection(selected);
+
+        setLanguageError(
+          "Could not load supported languages. Using the fallback list.",
+        );
+      }
+    }
+
+    void loadLanguages();
+
+    return () => {
+      cancelled = true;
     };
+  }, []);
+
+  /**
+   * Start observing dynamic content.
+   */
+  useEffect(() => {
+    mountedRef.current = true;
+
+    if (!document.body) {
+      return;
+    }
 
     const observer = new MutationObserver((mutations) => {
-      let newContent = false;
+      let hasNewContent = false;
 
       for (const mutation of mutations) {
         if (mutation.type === "characterData") {
           const node = mutation.target as Text;
 
-          // Ignore text changes made by our
-          // own translator.
-          const lastTranslated = translatedValuesRef.current.get(node);
+          const translated = translatedValuesRef.current.get(node);
 
-          if (lastTranslated !== undefined && node.data === lastTranslated) {
+          // Ignore our own translation writes.
+          if (translated !== undefined && node.data === translated) {
             continue;
           }
 
           if (!shouldIgnore(node)) {
-            newContent = true;
+            hasNewContent = true;
             break;
           }
         }
 
-        if (mutation.type === "childList" && mutation.addedNodes.length) {
+        if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
           for (const added of mutation.addedNodes) {
             if (added.nodeType === Node.TEXT_NODE) {
               const textNode = added as Text;
 
               if (!shouldIgnore(textNode)) {
-                newContent = true;
+                hasNewContent = true;
                 break;
               }
             }
@@ -725,18 +782,20 @@ export function LanguageSelector() {
               );
 
               if (walker.nextNode()) {
-                newContent = true;
+                hasNewContent = true;
                 break;
               }
             }
           }
         }
 
-        if (newContent) break;
+        if (hasNewContent) {
+          break;
+        }
       }
 
-      if (newContent) {
-        scheduleScan();
+      if (hasNewContent) {
+        scheduleScan(500);
       }
     });
 
@@ -748,29 +807,76 @@ export function LanguageSelector() {
 
     observerRef.current = observer;
 
-    // Initial translation once languages are ready.
-    void scanAndTranslate(currentLangRef.current);
-
-    // Periodic scan catches content missed by
-    // mutation observation or client-side updates.
-    intervalRef.current = setInterval(() => {
-      void scanAndTranslate(currentLangRef.current);
-    }, 5000);
+    // Initial scan. English mode leaves content unchanged.
+    void scanAndTranslateRef.current();
 
     return () => {
-      observer.disconnect();
+      mountedRef.current = false;
 
+      observer.disconnect();
       observerRef.current = null;
 
       if (scanTimerRef.current) {
         clearTimeout(scanTimerRef.current);
+        scanTimerRef.current = null;
       }
 
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+
+      requestIdRef.current++;
+      busyRef.current = false;
+      scanAgainRef.current = false;
     };
-  }, [scanAndTranslate]);
+  }, [scheduleScan]);
+
+  /**
+   * Change the current language.
+   */
+  const changeLanguage = useCallback(
+    async (language: string) => {
+      const target = normalizeCode(language);
+
+      if (target === currentLangRef.current) {
+        return;
+      }
+
+      // Invalidate and cancel the previous translation request.
+      requestIdRef.current++;
+
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+
+      busyRef.current = false;
+      scanAgainRef.current = false;
+
+      if (scanTimerRef.current) {
+        clearTimeout(scanTimerRef.current);
+        scanTimerRef.current = null;
+      }
+
+      currentLangRef.current = target;
+
+      setLang(target);
+      setBusy(false);
+
+      document.cookie =
+        `site_lang=${encodeURIComponent(target)}; ` +
+        "path=/; max-age=31536000; samesite=lax";
+
+      applyDirection(target);
+
+      // Restore the page before translating into the new language.
+      restoreOriginals();
+
+      if (isEnglish(target)) {
+        return;
+      }
+
+      await scanAndTranslate(target);
+    },
+    [restoreOriginals, scanAndTranslate],
+  );
 
   return (
     <div className="relative flex items-center gap-2" data-no-translate>
@@ -778,9 +884,8 @@ export function LanguageSelector() {
         id="language-picker"
         aria-label="Select language"
         value={lang}
-        disabled={busy}
-        onChange={(event) => changeLanguage(event.target.value)}
-        className="max-w-32 rounded-full border border-white/25 bg-[#2b211c] px-3 py-2 text-xs text-white"
+        onChange={(event) => void changeLanguage(event.target.value)}
+        className="max-w-32 rounded-full border border-white/25 bg-[#2b211c] px-3 py-2 text-xs text-white outline-none transition-colors hover:border-white/50 focus-visible:ring-2 focus-visible:ring-white/50"
       >
         {langs.map((language) => (
           <option key={language.code} value={language.code}>
@@ -790,8 +895,18 @@ export function LanguageSelector() {
       </select>
 
       {busy && (
-        <span className="text-[10px] text-white" aria-live="polite">
+        <span
+          className="whitespace-nowrap text-[10px] text-white/80"
+          aria-live="polite"
+          role="status"
+        >
           Translating…
+        </span>
+      )}
+
+      {languageError && (
+        <span className="sr-only" role="status">
+          {languageError}
         </span>
       )}
     </div>
