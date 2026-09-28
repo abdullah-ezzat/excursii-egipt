@@ -304,7 +304,7 @@ export default async function HomePage() {
                     </h3>
                   </Link>
 
-                  {settings.home_tours_details && <>
+                  {settings.home_tours_details == 'true' && <>
                     <div className="mt-3 min-w-0">
                       <ReadMore lines={3}>
                         <RichText

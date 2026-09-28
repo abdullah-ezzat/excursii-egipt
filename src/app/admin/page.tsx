@@ -51,7 +51,6 @@ export default async function AdminHome() {
             </a>
           ))}
         </nav>
-        <div className="mt-auto text-xs text-white/40">CMS · MySQL</div>
       </aside>
       <section className="md:ml-64">
         <header className="flex items-center justify-between border-b border-[#e7dfd3] bg-white px-6 py-5 md:px-10">
@@ -86,12 +85,6 @@ export default async function AdminHome() {
           </div>
           <div id="manager" className="mt-8">
             <AdminManager />
-          </div>
-          <div className="mt-8 border border-amber-200 bg-amber-50 p-5 text-xs leading-5 text-amber-900">
-            Important: configure HTTPS, a strong AUTH_SECRET, database backups,
-            rate limiting, and a real admin account before production. Booking
-            review and email workflows should be verified before accepting
-            payments or promising confirmations.
           </div>
         </div>
       </section>

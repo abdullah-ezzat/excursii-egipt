@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
+import { SiteLayout } from "@/components/site-layout";
 import { CookieConsent } from "@/components/cookie-consent";
 
 export const metadata: Metadata = {
@@ -34,10 +33,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <SiteHeader />
-        <main>{children}</main>
+        <SiteLayout>
+          {children}
+        </SiteLayout>
         <CookieConsent />
-        <SiteFooter />
       </body>
     </html>
   );
