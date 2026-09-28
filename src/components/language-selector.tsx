@@ -17,6 +17,12 @@ type TranslateResponse = {
   error?: string;
 };
 
+type PendingTranslation = {
+  node: Text;
+  original: string;
+  cacheKey: string;
+};
+
 const fallbackLangs: Language[] = [
   { code: "en", name: "English" },
   { code: "ru", name: "Russian" },
@@ -125,6 +131,13 @@ const languageRegions: Record<string, string> = {
   hu: "HU",
 };
 
+const BATCH_SIZE = 20;
+const MIN_SPINNER_DURATION = 700;
+const SCAN_DEBOUNCE = 500;
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 1500;
+const MAX_CACHE_ENTRIES = 5000;
+
 function normalizeCode(code: string): string {
   return code.trim().toLowerCase();
 }
@@ -208,7 +221,6 @@ function shouldIgnore(node: Text): boolean {
     return true;
   }
 
-  // Skip Next.js internal payloads.
   if (
     text.includes("self.__next_r") ||
     text.includes("self.__next_f") ||
@@ -224,17 +236,33 @@ function shouldIgnore(node: Text): boolean {
 function isTranslatableText(text: string): boolean {
   const trimmed = text.trim();
 
-  if (trimmed.length < 2) {
-    return false;
-  }
+  return trimmed.length >= 2 && /\p{L}/u.test(trimmed);
+}
 
-  return /\p{L}/u.test(trimmed);
+function cacheKeyFor(source: string, target: string, text: string): string {
+  return `${source}:${target}:${text}`;
+}
+
+function addToCache(
+  cache: Map<string, string>,
+  key: string,
+  value: string,
+): void {
+  // Refresh insertion order for basic LRU behavior.
+  cache.delete(key);
+  cache.set(key, value);
+
+  if (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+
+    if (oldestKey !== undefined) {
+      cache.delete(oldestKey);
+    }
+  }
 }
 
 /**
- * Fetch supported destination languages through Next.js.
- *
- * The browser must not call 127.0.0.1:5000 directly.
+ * Fetch supported languages through the Next.js API.
  */
 async function fetchSupportedLanguages(): Promise<Language[]> {
   const response = await fetch("/api/translate/languages", {
@@ -272,7 +300,6 @@ async function fetchSupportedLanguages(): Promise<Language[]> {
     }
   }
 
-  // Only offer languages the server supports as targets.
   const supported = models.filter((model) =>
     availableTargets.has(normalizeCode(model.code)),
   );
@@ -294,7 +321,7 @@ async function fetchSupportedLanguages(): Promise<Language[]> {
 }
 
 /**
- * Translate a batch using the Next.js API route.
+ * Translate a batch through the Next.js API route.
  */
 async function translateBatch(
   texts: string[],
@@ -335,11 +362,19 @@ async function translateBatch(
   return data.translations;
 }
 
-type PendingTranslation = {
-  node: Text;
-  original: string;
-  cacheKey: string;
-};
+function readSavedLanguage(): string {
+  const cookie = document.cookie.match(/(?:^|;\s*)site_lang=([^;]+)/);
+
+  if (!cookie?.[1]) {
+    return "en";
+  }
+
+  try {
+    return normalizeCode(decodeURIComponent(cookie[1]));
+  } catch {
+    return "en";
+  }
+}
 
 export function LanguageSelector() {
   const [lang, setLang] = useState("en");
@@ -347,31 +382,102 @@ export function LanguageSelector() {
   const [langs, setLangs] = useState<LanguageOption[]>([]);
   const [languageError, setLanguageError] = useState("");
 
-  // The original English content for each DOM text node.
+  // Original text for every text node modified by this component.
   const originalsRef = useRef(new WeakMap<Text, string>());
 
   // Last translated value written by this component.
   const translatedValuesRef = useRef(new WeakMap<Text, string>());
 
-  // Cache translations across scans and language changes.
+  // Successful translations only.
   const cacheRef = useRef(new Map<string, string>());
 
-  const currentLangRef = useRef("en");
+  // Prevent simultaneous scans.
   const busyRef = useRef(false);
-  const mountedRef = useRef(false);
+  const busyStartedAtRef = useRef(0);
 
-  const scanAgainRef = useRef(false);
-  const requestIdRef = useRef(0);
+  const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const mountedRef = useRef(false);
+  const initializedRef = useRef(false);
+
+  const currentLangRef = useRef("en");
+  const scanAgainRef = useRef(false);
+
+  const requestIdRef = useRef(0);
 
   const observerRef = useRef<MutationObserver | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Tracks failures per language/text pair to avoid infinite retries.
+  const failuresRef = useRef(new Map<string, number>());
+
+  // Stable scan reference for observers and timers.
+  const scanAndTranslateRef = useRef<
+    (requestedLanguage?: string) => Promise<void>
+  >(async () => {});
+
   /**
-   * Schedule one debounced scan.
+   * Show spinner without flicker.
    */
-  const scheduleScan = useCallback((delay = 500) => {
+  const showTranslationSpinner = useCallback(() => {
+    if (busyTimerRef.current) {
+      clearTimeout(busyTimerRef.current);
+      busyTimerRef.current = null;
+    }
+
+    if (busyRef.current) {
+      return;
+    }
+
+    busyRef.current = true;
+    busyStartedAtRef.current = Date.now();
+
+    if (mountedRef.current) {
+      setBusy(true);
+    }
+  }, []);
+
+  /**
+   * Hide spinner after a minimum visible duration.
+   */
+  const hideTranslationSpinner = useCallback(() => {
+    if (busyTimerRef.current) {
+      clearTimeout(busyTimerRef.current);
+    }
+
+    const elapsed = Date.now() - busyStartedAtRef.current;
+
+    const remaining = Math.max(0, MIN_SPINNER_DURATION - elapsed);
+
+    busyTimerRef.current = setTimeout(() => {
+      busyTimerRef.current = null;
+      busyRef.current = false;
+
+      if (mountedRef.current) {
+        setBusy(false);
+      }
+
+      // If new content arrived while the spinner was visible,
+      // start another scan after the current one has finished.
+      if (scanAgainRef.current && mountedRef.current) {
+        scanAgainRef.current = false;
+        scheduleScan(150);
+      }
+    }, remaining);
+  }, []);
+
+  /**
+   * Schedule a debounced translation scan.
+   */
+  const scheduleScan = useCallback((delay = SCAN_DEBOUNCE) => {
+    if (!mountedRef.current) {
+      return;
+    }
+
     if (scanTimerRef.current) {
       clearTimeout(scanTimerRef.current);
     }
@@ -386,10 +492,13 @@ export function LanguageSelector() {
   }, []);
 
   /**
-   * Restore original text without overwriting changes
-   * made by React or other scripts.
+   * Restore original text without overwriting React changes.
    */
   const restoreOriginals = useCallback(() => {
+    if (!document.body) {
+      return;
+    }
+
     const walker = document.createTreeWalker(
       document.body,
       NodeFilter.SHOW_TEXT,
@@ -399,6 +508,7 @@ export function LanguageSelector() {
 
     while ((current = walker.nextNode())) {
       const node = current as Text;
+
       const translated = translatedValuesRef.current.get(node);
 
       if (translated === undefined) {
@@ -416,11 +526,52 @@ export function LanguageSelector() {
   }, []);
 
   /**
-   * Translate the current page into the requested language.
+   * Get the original text for a node.
+   *
+   * React can update the contents of an existing text node,
+   * so the original must be refreshed when its text changes.
+   */
+  const getOriginalText = useCallback((node: Text): string => {
+    const currentText = node.data;
+
+    const translated = translatedValuesRef.current.get(node);
+
+    let original = originalsRef.current.get(node);
+
+    if (translated !== undefined && currentText === translated) {
+      return original ?? currentText;
+    }
+
+    // A changed node is treated as new original content.
+    if (original === undefined || currentText !== original) {
+      original = currentText;
+
+      originalsRef.current.set(node, original);
+      translatedValuesRef.current.delete(node);
+    }
+
+    return original;
+  }, []);
+
+  /**
+   * Translate all currently untranslated text.
    */
   const scanAndTranslate = useCallback(
-    async (requestedLanguage?: string) => {
-      if (!mountedRef.current) {
+    async (requestedLanguage?: string): Promise<void> => {
+      if (!mountedRef.current || !document.body) {
+        return;
+      }
+
+      const target = normalizeCode(requestedLanguage || currentLangRef.current);
+
+      if (!target) {
+        return;
+      }
+
+      // English is the source language. Restore translated nodes
+      // and leave all page text in its original form.
+      if (isEnglish(target)) {
+        restoreOriginals();
         return;
       }
 
@@ -429,19 +580,12 @@ export function LanguageSelector() {
         return;
       }
 
-      const target = normalizeCode(requestedLanguage || currentLangRef.current);
-
-      if (!target || isEnglish(target)) {
-        restoreOriginals();
-        return;
-      }
-
-      busyRef.current = true;
-      setBusy(true);
+      showTranslationSpinner();
 
       scanAgainRef.current = false;
 
       const requestId = ++requestIdRef.current;
+
       const controller = new AbortController();
 
       abortControllerRef.current = controller;
@@ -451,6 +595,8 @@ export function LanguageSelector() {
         requestId === requestIdRef.current &&
         target === currentLangRef.current &&
         !controller.signal.aborted;
+
+      const pending: PendingTranslation[] = [];
 
       try {
         const walker = document.createTreeWalker(
@@ -473,44 +619,35 @@ export function LanguageSelector() {
           },
         );
 
-        const pending: PendingTranslation[] = [];
-
         let current: Node | null;
 
+        // First pass: find untranslated text and apply cache.
         while ((current = walker.nextNode())) {
+          if (!isCurrentRequest()) {
+            break;
+          }
+
           const node = current as Text;
-          const currentText = node.data;
 
           const previousTranslated = translatedValuesRef.current.get(node);
 
           // Already translated into the active language.
           if (
             previousTranslated !== undefined &&
-            currentText === previousTranslated
+            node.data === previousTranslated
           ) {
             continue;
           }
 
-          let original = originalsRef.current.get(node);
-
-          // New text node or React changed the text.
-          if (
-            original === undefined ||
-            (previousTranslated !== undefined &&
-              currentText !== previousTranslated)
-          ) {
-            original = currentText;
-
-            originalsRef.current.set(node, original);
-            translatedValuesRef.current.delete(node);
-          }
+          const original = getOriginalText(node);
 
           if (!isTranslatableText(original)) {
             continue;
           }
 
           const source = "en";
-          const cacheKey = `${source}:${target}:${original}`;
+
+          const cacheKey = cacheKeyFor(source, target, original);
 
           const cached = cacheRef.current.get(cacheKey);
 
@@ -522,9 +659,17 @@ export function LanguageSelector() {
               isCurrentRequest()
             ) {
               node.data = cached;
+
               translatedValuesRef.current.set(node, cached);
             }
 
+            continue;
+          }
+
+          // Skip text that has exhausted its retry allowance.
+          const failures = failuresRef.current.get(cacheKey) ?? 0;
+
+          if (failures >= MAX_RETRIES) {
             continue;
           }
 
@@ -535,54 +680,112 @@ export function LanguageSelector() {
           });
         }
 
-        const batchSize = 20;
-
-        for (let i = 0; i < pending.length; i += batchSize) {
+        // Second pass: send translation batches.
+        for (let offset = 0; offset < pending.length; offset += BATCH_SIZE) {
           if (!isCurrentRequest()) {
             break;
           }
 
-          const batch = pending.slice(i, i + batchSize);
+          const batch = pending.slice(offset, offset + BATCH_SIZE);
 
-          const translations = await translateBatch(
-            batch.map((item) => item.original),
-            "en",
-            target,
-            controller.signal,
+          try {
+            const translations = await translateBatch(
+              batch.map((item) => item.original),
+              "en",
+              target,
+              controller.signal,
+            );
+
+            if (!isCurrentRequest()) {
+              break;
+            }
+
+            for (let index = 0; index < batch.length; index++) {
+              const item = batch[index];
+
+              const translated = translations[index];
+
+              // Do not cache or apply empty responses.
+              if (typeof translated !== "string" || !translated.trim()) {
+                failuresRef.current.set(
+                  item.cacheKey,
+                  (failuresRef.current.get(item.cacheKey) ?? 0) + 1,
+                );
+
+                continue;
+              }
+
+              const result = translated;
+
+              // A valid translation is cached even if the
+              // corresponding node has been removed.
+              addToCache(cacheRef.current, item.cacheKey, result);
+
+              failuresRef.current.delete(item.cacheKey);
+
+              // Do not overwrite removed or excluded nodes.
+              if (!item.node.isConnected || shouldIgnore(item.node)) {
+                continue;
+              }
+
+              // React may have changed this node while the
+              // network request was in progress.
+              if (item.node.data !== item.original) {
+                continue;
+              }
+
+              if (originalsRef.current.get(item.node) !== item.original) {
+                continue;
+              }
+
+              if (!isCurrentRequest()) {
+                break;
+              }
+
+              item.node.data = result;
+
+              translatedValuesRef.current.set(item.node, result);
+            }
+          } catch (error) {
+            if (error instanceof Error && error.name === "AbortError") {
+              break;
+            }
+
+            console.error("Translation batch failed:", error);
+
+            // Increment failure counts for this batch.
+            // Failed items will be retried on the next scan.
+            for (const item of batch) {
+              const failures = failuresRef.current.get(item.cacheKey) ?? 0;
+
+              failuresRef.current.set(item.cacheKey, failures + 1);
+            }
+
+            // Do not stop translating other batches when
+            // one batch fails.
+          }
+        }
+
+        // Schedule one automatic retry if failed text remains.
+        // Retry only a limited number of times.
+        if (isCurrentRequest()) {
+          const hasRetryableFailures = pending.some(
+            (item) =>
+              (failuresRef.current.get(item.cacheKey) ?? 0) < MAX_RETRIES,
           );
 
-          if (!isCurrentRequest()) {
-            break;
-          }
-
-          for (let index = 0; index < batch.length; index++) {
-            const item = batch[index];
-            const translated = translations[index];
-
-            if (typeof translated !== "string" || !translated.trim()) {
-              continue;
+          if (hasRetryableFailures) {
+            if (retryTimerRef.current) {
+              clearTimeout(retryTimerRef.current);
             }
 
-            // Cache even when the node has been removed.
-            cacheRef.current.set(item.cacheKey, translated);
+            retryTimerRef.current = setTimeout(() => {
+              retryTimerRef.current = null;
 
-            // Do not overwrite a removed or excluded node.
-            if (!item.node.isConnected || shouldIgnore(item.node)) {
-              continue;
-            }
-
-            // Only write if React has not changed the node.
-            if (item.node.data !== item.original) {
-              continue;
-            }
-
-            if (originalsRef.current.get(item.node) !== item.original) {
-              continue;
-            }
-
-            item.node.data = translated;
-
-            translatedValuesRef.current.set(item.node, translated);
+              if (mountedRef.current && target === currentLangRef.current) {
+                scheduleScan(100);
+              }
+            }, RETRY_DELAY);
           }
         }
       } catch (error) {
@@ -591,121 +794,107 @@ export function LanguageSelector() {
         }
       } finally {
         if (requestId === requestIdRef.current) {
-          busyRef.current = false;
           abortControllerRef.current = null;
 
-          if (mountedRef.current) {
-            setBusy(false);
-          }
-
-          if (scanAgainRef.current && mountedRef.current) {
-            scanAgainRef.current = false;
-            scheduleScan(300);
-          }
+          hideTranslationSpinner();
         }
       }
     },
-    [restoreOriginals, scheduleScan],
+    [
+      getOriginalText,
+      hideTranslationSpinner,
+      restoreOriginals,
+      scheduleScan,
+      showTranslationSpinner,
+    ],
   );
 
-  // Keep a stable reference for the observer and timers.
-  const scanAndTranslateRef = useRef(scanAndTranslate);
-
+  // Update stable scan reference.
   useEffect(() => {
     scanAndTranslateRef.current = scanAndTranslate;
   }, [scanAndTranslate]);
 
   /**
-   * Load available languages and restore the saved choice.
+   * Load supported languages and restore saved language.
    */
   useEffect(() => {
     let cancelled = false;
 
     async function loadLanguages() {
+      let options: LanguageOption[];
+
       try {
         const supported = await fetchSupportedLanguages();
 
-        if (cancelled) {
-          return;
-        }
-
-        const options: LanguageOption[] = supported.map((item) => ({
+        options = supported.map((item) => ({
           ...item,
           flag: getFlag(item.code),
         }));
-
-        // Ensure English is available as the default.
-        if (!options.some((item) => item.code === "en")) {
-          options.unshift({
-            code: "en",
-            name: "English",
-            flag: getFlag("en"),
-          });
-        }
-
-        setLangs(options);
-
-        const cookie = document.cookie.match(/(?:^|;\s*)site_lang=([^;]+)/);
-
-        let saved = "en";
-
-        if (cookie?.[1]) {
-          try {
-            saved = normalizeCode(decodeURIComponent(cookie[1]));
-          } catch {
-            saved = "en";
-          }
-        }
-
-        const selected = options.some((item) => item.code === saved)
-          ? saved
-          : "en";
-
-        currentLangRef.current = selected;
-
-        setLang(selected);
-        applyDirection(selected);
 
         setLanguageError("");
       } catch (error) {
         console.error("Could not load translation languages:", error);
 
-        if (cancelled) {
-          return;
-        }
-
-        const options: LanguageOption[] = fallbackLangs.map((item) => ({
+        options = fallbackLangs.map((item) => ({
           ...item,
           code: normalizeCode(item.code),
           flag: getFlag(item.code),
         }));
 
-        setLangs(options);
-
-        const cookie = document.cookie.match(/(?:^|;\s*)site_lang=([^;]+)/);
-
-        let saved = "en";
-
-        if (cookie?.[1]) {
-          try {
-            saved = normalizeCode(decodeURIComponent(cookie[1]));
-          } catch {
-            saved = "en";
-          }
-        }
-
-        const selected = options.some((item) => item.code === saved)
-          ? saved
-          : "en";
-
-        currentLangRef.current = selected;
-
-        setLang(selected);
-        applyDirection(selected);
-
         setLanguageError(
           "Could not load supported languages. Using the fallback list.",
         );
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      // Always provide English as a selectable language.
+      if (!options.some((item) => item.code === "en")) {
+        options.unshift({
+          code: "en",
+          name: "English",
+          flag: getFlag("en"),
+        });
+      }
+
+      // Deduplicate language options.
+      const unique = new Map<string, LanguageOption>();
+
+      for (const option of options) {
+        const code = normalizeCode(option.code);
+
+        if (!unique.has(code)) {
+          unique.set(code, {
+            ...option,
+            code,
+          });
+        }
+      }
+
+      options = Array.from(unique.values());
+
+      setLangs(options);
+
+      const saved = readSavedLanguage();
+
+      const selected = options.some((item) => item.code === saved)
+        ? saved
+        : "en";
+
+      currentLangRef.current = selected;
+
+      setLang(selected);
+
+      applyDirection(selected);
+
+      initializedRef.current = true;
+
+      // Automatically translate on initial load when the
+      // saved language is not English.
+      if (!isEnglish(selected)) {
+        scheduleScan(100);
       }
     }
 
@@ -714,10 +903,10 @@ export function LanguageSelector() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scheduleScan]);
 
   /**
-   * Start observing dynamic content.
+   * Observe React and dynamically inserted page content.
    */
   useEffect(() => {
     mountedRef.current = true;
@@ -735,12 +924,12 @@ export function LanguageSelector() {
 
           const translated = translatedValuesRef.current.get(node);
 
-          // Ignore our own translation writes.
+          // Ignore mutations caused by our own translations.
           if (translated !== undefined && node.data === translated) {
             continue;
           }
 
-          if (!shouldIgnore(node)) {
+          if (!shouldIgnore(node) && isTranslatableText(node.data)) {
             hasNewContent = true;
             break;
           }
@@ -751,7 +940,10 @@ export function LanguageSelector() {
             if (added.nodeType === Node.TEXT_NODE) {
               const textNode = added as Text;
 
-              if (!shouldIgnore(textNode)) {
+              if (
+                !shouldIgnore(textNode) &&
+                isTranslatableText(textNode.data)
+              ) {
                 hasNewContent = true;
                 break;
               }
@@ -774,9 +966,15 @@ export function LanguageSelector() {
                   acceptNode(node) {
                     const textNode = node as Text;
 
-                    return shouldIgnore(textNode)
-                      ? NodeFilter.FILTER_REJECT
-                      : NodeFilter.FILTER_ACCEPT;
+                    if (shouldIgnore(textNode)) {
+                      return NodeFilter.FILTER_REJECT;
+                    }
+
+                    if (!isTranslatableText(textNode.data)) {
+                      return NodeFilter.FILTER_REJECT;
+                    }
+
+                    return NodeFilter.FILTER_ACCEPT;
                   },
                 },
               );
@@ -795,7 +993,11 @@ export function LanguageSelector() {
       }
 
       if (hasNewContent) {
-        scheduleScan(500);
+        if (busyRef.current) {
+          scanAgainRef.current = true;
+        } else {
+          scheduleScan(SCAN_DEBOUNCE);
+        }
       }
     });
 
@@ -807,8 +1009,10 @@ export function LanguageSelector() {
 
     observerRef.current = observer;
 
-    // Initial scan. English mode leaves content unchanged.
-    void scanAndTranslateRef.current();
+    // Initial scan after observer is active.
+    if (initializedRef.current) {
+      void scanAndTranslateRef.current();
+    }
 
     return () => {
       mountedRef.current = false;
@@ -821,17 +1025,28 @@ export function LanguageSelector() {
         scanTimerRef.current = null;
       }
 
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+
+      if (busyTimerRef.current) {
+        clearTimeout(busyTimerRef.current);
+        busyTimerRef.current = null;
+      }
+
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
 
       requestIdRef.current++;
+
       busyRef.current = false;
       scanAgainRef.current = false;
     };
   }, [scheduleScan]);
 
   /**
-   * Change the current language.
+   * Change language and safely cancel previous requests.
    */
   const changeLanguage = useCallback(
     async (language: string) => {
@@ -841,24 +1056,38 @@ export function LanguageSelector() {
         return;
       }
 
-      // Invalidate and cancel the previous translation request.
+      // Invalidate any active request.
       requestIdRef.current++;
 
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
 
-      busyRef.current = false;
-      scanAgainRef.current = false;
-
+      // Cancel scheduled scans and retries.
       if (scanTimerRef.current) {
         clearTimeout(scanTimerRef.current);
         scanTimerRef.current = null;
       }
 
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+
+      if (busyTimerRef.current) {
+        clearTimeout(busyTimerRef.current);
+        busyTimerRef.current = null;
+      }
+
+      busyRef.current = false;
+      scanAgainRef.current = false;
+
       currentLangRef.current = target;
 
       setLang(target);
       setBusy(false);
+
+      // Reset failure counts for the newly selected language.
+      failuresRef.current.clear();
 
       document.cookie =
         `site_lang=${encodeURIComponent(target)}; ` +
@@ -866,7 +1095,7 @@ export function LanguageSelector() {
 
       applyDirection(target);
 
-      // Restore the page before translating into the new language.
+      // Restore original text before changing languages.
       restoreOriginals();
 
       if (isEnglish(target)) {
@@ -879,13 +1108,24 @@ export function LanguageSelector() {
   );
 
   return (
-    <div className="relative flex items-center gap-2" data-no-translate>
+    <div className="relative flex min-w-0 items-center gap-2" data-no-translate>
       <select
         id="language-picker"
         aria-label="Select language"
         value={lang}
         onChange={(event) => void changeLanguage(event.target.value)}
-        className="max-w-32 rounded-full border border-white/25 bg-[#2b211c] px-3 py-2 text-xs text-white outline-none transition-colors hover:border-white/50 focus-visible:ring-2 focus-visible:ring-white/50"
+        className="
+          max-w-32 min-w-0 rounded-full
+          border border-white/25
+          bg-[#2b211c]
+          px-3 py-2
+          text-xs text-white
+          outline-none
+          transition-colors
+          hover:border-white/50
+          focus-visible:ring-2
+          focus-visible:ring-white/50
+        "
       >
         {langs.map((language) => (
           <option key={language.code} value={language.code}>
@@ -895,13 +1135,78 @@ export function LanguageSelector() {
       </select>
 
       {busy && (
-        <span
-          className="whitespace-nowrap text-[10px] text-white/80"
-          aria-live="polite"
+        <div
           role="status"
+          aria-live="polite"
+          aria-label="Translating page"
+          className="
+            relative inline-flex shrink-0 items-center gap-2.5
+            overflow-hidden rounded-full
+            border border-white/15
+            bg-white/[0.08]
+            px-3 py-2
+            text-[11px] font-medium tracking-wide text-white/90
+            shadow-lg shadow-black/10
+            backdrop-blur-xl
+            animate-in fade-in duration-300
+          "
         >
-          Translating…
-        </span>
+          {/* Subtle animated background */}
+          <span
+            aria-hidden="true"
+            className="
+              absolute inset-0
+              bg-gradient-to-r from-transparent
+              via-white/[0.07] to-transparent
+              animate-pulse
+            "
+          />
+
+          {/* Spinner */}
+          <span
+            aria-hidden="true"
+            className="
+              relative flex size-[18px] shrink-0
+              items-center justify-center
+            "
+          >
+            <span
+              className="
+                absolute inset-0 rounded-full
+                border-2 border-white/15
+              "
+            />
+
+            <span
+              className="
+                absolute inset-0 rounded-full
+                border-2 border-transparent
+                border-t-[#e8bd83]
+                border-r-[#e8bd83]
+                animate-spin
+              "
+              style={{
+                animationDuration: "700ms",
+              }}
+            />
+
+            <span
+              className="
+                size-1 rounded-full
+                bg-[#e8bd83]
+                shadow-[0_0_8px_rgba(232,189,131,0.8)]
+              "
+            />
+          </span>
+
+          {/* Loading label */}
+          <span className="relative whitespace-nowrap">
+            Translating
+            <span className="inline-flex w-5 justify-start">
+              <span className="animate-pulse">...</span>
+            </span>
+          </span>
+        </div>
       )}
 
       {languageError && (
