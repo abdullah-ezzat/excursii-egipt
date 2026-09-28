@@ -1,0 +1,11 @@
+ALTER TABLE `Tour`
+  ADD COLUMN `recommended` BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN `offer` BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN `private` BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN `subtitle` TEXT NULL,
+  ADD COLUMN `tag` VARCHAR(191) NULL,
+  ADD COLUMN `sortOrder` INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN `tripCategoryId` VARCHAR(191) NULL;
+CREATE INDEX `Tour_tripCategoryId_idx` ON `Tour`(`tripCategoryId`);
+ALTER TABLE `Tour` ADD CONSTRAINT `Tour_tripCategoryId_fkey`
+  FOREIGN KEY (`tripCategoryId`) REFERENCES `TripCategory`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;

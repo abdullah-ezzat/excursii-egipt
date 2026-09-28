@@ -1,0 +1,4 @@
+import {cookies} from "next/headers";import {jwtVerify,SignJWT} from "jose";
+function secret(){const value=process.env.AUTH_SECRET;if(!value||value.length<32){if(process.env.NODE_ENV==="production")throw new Error("AUTH_SECRET must be configured with at least 32 characters.");return new TextEncoder().encode("local-development-only-secret-not-for-production")}return new TextEncoder().encode(value)}
+export async function createAdminSession(userId:string){return new SignJWT({sub:userId,role:"ADMIN"}).setProtectedHeader({alg:"HS256"}).setIssuedAt().setExpirationTime("8h").sign(secret())}
+export async function getAdminSession(){try{const token=(await cookies()).get("ee_admin")?.value;if(!token)return null;const {payload}=await jwtVerify(token,secret());if(payload.role!=="ADMIN"||!payload.sub)return null;return {userId:payload.sub}}catch{return null}}

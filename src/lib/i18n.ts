@@ -1,0 +1,10 @@
+export const locales = ["ro", "en", "de", "fr", "it", "pl", "hu", "ru"] as const;
+export type Locale = (typeof locales)[number];
+export const defaultLocale: Locale = "en";
+export const dictionaries = {
+  ro: { navTours: "Excursii", navAbout: "Despre noi", navContact: "Contact", book: "Rezervă acum", explore: "Descoperă Egiptul", heroEyebrow: "Experiențe autentice • Amintiri pentru o viață", heroTitle: "Egiptul te cheamă.", heroText: "Descoperă comorile Egiptului cu ghizi locali, experiențe atent alese și momente care rămân cu tine.", featured: "Experiențe de neratat", featuredText: "Alege aventura care ți se potrivește.", viewAll: "Vezi toate excursiile", from: "De la", days: "ore", why: "De ce să călătorești cu noi", whyText: "Grijă pentru fiecare detaliu, de la primul mesaj până la ultima fotografie.", contact: "Hai să planificăm aventura ta", contactText: "Spune-ne ce ți-ai dori să descoperi. Ne ocupăm noi de restul.", name: "Numele tău", email: "Adresa de email", phone: "Telefon / WhatsApp", message: "Cum te putem ajuta?", send: "Trimite solicitarea", footer: "Aventuri memorabile în Egipt." },
+  en: { navTours: "Tours", navAbout: "About", navContact: "Contact", book: "Book now", explore: "Discover Egypt", heroEyebrow: "Authentic experiences • Memories for a lifetime", heroTitle: "Egypt is calling.", heroText: "Discover Egypt's treasures with local guides, thoughtfully curated experiences, and moments that stay with you.", featured: "Unmissable experiences", featuredText: "Choose the adventure that feels right for you.", viewAll: "View all tours", from: "From", days: "hours", why: "Why travel with us", whyText: "Thoughtful care in every detail, from your first message to your last photo.", contact: "Let's plan your adventure", contactText: "Tell us what you'd love to discover. We'll take care of the rest.", name: "Your name", email: "Email address", phone: "Phone / WhatsApp", message: "How can we help?", send: "Send enquiry", footer: "Memorable adventures in Egypt." }
+} as const;
+export function getDictionary(locale: string) {
+  return dictionaries[locale as "ro" | "en"] ?? dictionaries.en;
+}

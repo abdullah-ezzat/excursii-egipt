@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+:root {
+    --ink: #251b17;
+    --paper: #fbf8f2;
+    --sand: #e9d9bd;
+    --gold: #b98a48;
+    --wine: #702f2b
+}
+
+* {
+    box-sizing: border-box
+}
+
+html {
+    scroll-behavior: smooth
+}
+
+body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Arial, Helvetica, sans-serif
+}
+
+.serif {
+    font-family: Georgia, 'Times New Roman', serif
+}
+
+.container-x {
+    width: min(1200px, calc(100% - 48px));
+    margin-inline: auto
+}
+
+.gold-line {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #b98a48, transparent)
+}
+
+.hero-bg {
+    background: linear-gradient(90deg, rgba(20, 16, 13, .76), rgba(20, 16, 13, .15)), url('/sliders/hyshqsz9al4Z3nDgfiS429AKKFxxZMX40BIvWs0q.jpg') center/cover
+}
+
+.glass {
+    background: rgba(255, 255, 255, .10);
+    backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, .24)
+}
+
+.card-image {
+    transition: transform .7s cubic-bezier(.2, .7, .2, 1)
+}
+
+.tour-card:hover .card-image {
+    transform: scale(1.06)
+}
+
+::selection {
+    background: #b98a48;
+    color: white
+}
+
+@media(max-width:640px) {
+    .container-x {
+        width: min(100% - 32px, 1200px)
+    }
+}
+
+html[dir="rtl"] body {
+    direction: rtl;
+}
+
+html[dir="rtl"] input,
+html[dir="rtl"] textarea,
+html[dir="rtl"] select {
+    text-align: right;
+}
+
+html[dir="rtl"] table {
+    direction: rtl;
+}

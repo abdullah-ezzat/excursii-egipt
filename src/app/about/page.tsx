@@ -1,0 +1,5 @@
+import {prisma} from "@/lib/prisma";import {SiteHeader} from "@/components/site-header";import {SiteFooter} from "@/components/site-footer";import {Compass,HeartHandshake,ShieldCheck,Sparkles} from "lucide-react";
+export const metadata={title:"About Us",description:"Meet the local team behind Excursii Egipt and discover our approach to memorable Egypt tours."};
+export const dynamic="force-dynamic";
+export default async function AboutPage(){let page:any=null;try{page=await prisma.page.findUnique({where:{slug:"about"}})}catch{}
+return <><div className="bg-[#2b211c] text-white"><SiteHeader/><div className="container-x pb-20 pt-40"><p className="text-xs uppercase tracking-[.25em] text-[#d7ac69]">Our story</p><h1 className="serif mt-4 text-5xl md:text-7xl">{page?.title||"About Excursii Egipt"}</h1><p className="mt-5 max-w-2xl leading-7 text-white/65">{page?.seoDescription||""}</p></div></div><main className="container-x py-16 md:py-24"><div className="mx-auto max-w-3xl"><p className="serif text-3xl leading-relaxed md:text-4xl">{page?.content||""}</p></div></main><SiteFooter/></>}

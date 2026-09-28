@@ -1,0 +1,1 @@
+import {NextResponse} from "next/server";export async function GET(){return NextResponse.json({ok:true,app:"Excursii Egipt",version:"1.0.0",databaseConfigured:Boolean(process.env.DATABASE_URL)});}

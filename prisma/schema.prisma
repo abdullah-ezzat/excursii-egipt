@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+model Tour {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  excerpt     String   @db.Text
+  description String   @db.Text
+  destination String
+  origin      String   @default("Hurghada")
+  itinerary   String?  @db.LongText
+  included    String?  @db.LongText
+  excluded    String?  @db.LongText
+  duration    String
+  price       Decimal  @db.Decimal(10,2)
+  currency    String   @default("EUR")
+  image       String
+  featured    Boolean  @default(false)
+  recommended Boolean  @default(false)
+  offer       Boolean  @default(false)
+  private     Boolean  @default(false)
+  subtitle    String?  @db.Text
+  tag         String?
+  sortOrder   Int      @default(0)
+  tripCategoryId String?
+  tripCategory TripCategory? @relation(fields: [tripCategoryId], references: [id], onDelete: SetNull)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  bookings    Booking[]
+}
+model Booking {
+  id          String   @id @default(cuid())
+  reference   String   @unique
+  tourId      String
+  tour        Tour     @relation(fields: [tourId], references: [id])
+  name        String
+  email       String
+  phone       String
+  date        DateTime
+  guests      Int
+  notes       String?  @db.Text
+  status      String   @default("NEW")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         String   @default("ADMIN")
+  createdAt    DateTime @default(now())
+}
+model SiteSetting {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+model Translation {
+  id        String   @id @default(cuid())
+  entity    String
+  entityId  String
+  locale    String
+  field     String
+  value     String   @db.Text
+  source    String   @default("machine")
+  updatedAt DateTime @updatedAt
+  @@unique([entity, entityId, locale, field])
+}
+
+model Enquiry {
+  id        String   @id @default(cuid())
+  reference String   @unique
+  name      String
+  email     String
+  phone     String?
+  message   String   @db.Text
+  status    String   @default("NEW")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Page {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  content     String   @db.LongText
+  seoTitle    String?
+  seoDescription String? @db.Text
+  published   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+model SpecialOffer {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  description String   @db.Text
+  image       String?
+  price       Decimal  @db.Decimal(10,2)
+  oldPrice    Decimal? @db.Decimal(10,2)
+  currency    String   @default("EUR")
+  validUntil  DateTime?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+model GalleryItem {
+  id          String   @id @default(cuid())
+  title       String
+  image       String
+  category    String   @default("Egypt")
+  alt         String?
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+model PriceItem {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  description String?  @db.Text
+  price       Decimal  @db.Decimal(10,2)
+  unit        String   @default("per person")
+  currency    String   @default("EUR")
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TripCategory {
+  id          String   @id @default(cuid())
+  routeId     Int      @unique
+  slug        String   @unique
+  name        String
+  description String   @db.Text
+  image       String?
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  tours       Tour[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TranslationCache {
+  id             String   @id @default(cuid())
+  source         String   @db.VarChar(20)
+  target         String   @db.VarChar(20)
+  textHash       String   @db.Char(64)
+  originalText   String   @db.Text
+  translatedText String   @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([source, target, textHash])
+  @@index([source, target])
+}

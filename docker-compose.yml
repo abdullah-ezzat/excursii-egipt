@@ -1,0 +1,22 @@
+services:
+  libretranslate2:
+    image: libretranslate/libretranslate:latest
+    container_name: libretranslate2
+    restart: unless-stopped
+
+    ports:
+      - "5000:5000"
+
+    environment:
+      LT_REQ_LIMIT: "0"
+      LT_BATCH_LIMIT: "0"
+      LT_API_KEYS: "false"
+      LT_REQUIRE_API_KEY: "false"
+
+    volumes:
+      - libretranslate_api_keys:/app/db
+      - libretranslate_models:/home/libretranslate/.local
+
+volumes:
+  libretranslate_api_keys:
+  libretranslate_models:
